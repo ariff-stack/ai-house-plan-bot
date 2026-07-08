@@ -4,13 +4,25 @@ from google import genai
 import os
 
 # --- 1. CONFIGURATION & AI INITIALIZATION ---
-# Automatically reads the API key securely from Streamlit Cloud Secrets (Production)
-# or from your local .streamlit/secrets.toml file (Development)
+# Fallback structure ensures it checks for local variables or Streamlit Cloud Secrets cleanly
+API_KEY = None
+
+if "GEMINI_API_KEY" in st.secrets:
+    # .strip() cleans out hidden newline characters or spaces pasted into the secrets dashboard
+    API_KEY = str(st.secrets["GEMINI_API_KEY"]).strip()
+else:
+    # Local hardcoded fallback for direct desktop script execution testing
+    API_KEY = "YOUR_LOCAL_BACKUP_KEY_HERE"
+
+if not API_KEY or "YOUR_LOCAL" in API_KEY:
+    st.error("🔑 Missing GEMINI_API_KEY! Please configure it in your Streamlit Advanced Settings Secrets.")
+    st.stop()
+
 try:
-    API_KEY = st.secrets["GEMINI_API_KEY"]
+    # Initialize the modern official GenAI production SDK client
     client = genai.Client(api_key=API_KEY)
 except Exception as e:
-    st.error("🔑 Missing GEMINI_API_KEY! Please configure it in your Streamlit Advanced Settings Secrets.")
+    st.error(f"Initialization Failed: {e}")
     st.stop()
 
 st.set_page_config(page_title="AI House Plan Consultant", page_icon="🏠", layout="wide")
@@ -25,7 +37,6 @@ def load_excel_data():
     if not os.path.exists(filename):
         return []
     try:
-        # data_only=True reads calculated values instead of raw formulas
         wb = load_workbook(filename, data_only=True)
         sheet = wb.active
         headers = [cell.value for cell in sheet[1]]
@@ -103,12 +114,10 @@ for message in st.session_state.messages:
 
 # --- 5. CHAT LOGIC ---
 if user_input := st.chat_input("Type your house requirements here..."):
-    # Append user message to display state
     st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
         st.write(user_input)
 
-    # Format the dataset array into string tokens to feed as contextual injection context
     database_context = "Here are the available house plans we can build:\n"
     if all_houses:
         for idx, h in enumerate(all_houses):
@@ -129,7 +138,7 @@ if user_input := st.chat_input("Type your house requirements here..."):
             try:
                 full_prompt = f"{system_prompt}\n\nDatabase Context:\n{database_context}\n\nUser request: {user_input}"
                 
-                # Official Python Client generation call using the default model
+                # Production generation call targeting the modern fast Gemini engine
                 response = client.models.generate_content(
                     model='gemini-2.5-flash',
                     contents=full_prompt,
@@ -137,7 +146,6 @@ if user_input := st.chat_input("Type your house requirements here..."):
                 ai_text = response.text
                 st.write(ai_text)
                 
-                # Parse string tag to determine which expander records to render
                 matched_plans_to_display = []
                 if "[MATCHES:" in ai_text:
                     parsed_section = ai_text.split("[MATCHES:")[-1].replace("]", "").strip()
@@ -152,7 +160,6 @@ if user_input := st.chat_input("Type your house requirements here..."):
                 if matched_plans_to_display:
                     new_message["matched_plans"] = matched_plans_to_display
                     
-                    # Output interactive metadata UI cards directly below AI response text
                     for house in matched_plans_to_display:
                         with st.expander(f"📋 View Blueprint Details for {house.get('3D_Folder_Path')}"):
                             c1, c2 = st.columns([1, 1])
